@@ -1,0 +1,10 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["node_modules/xlsx/**"]
+
+[[plugins]]
+  package = "@netlify/plugin-functions-install-core"

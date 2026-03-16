@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Copiloto Asesor ⚡</title>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#060b14;font-family:Georgia,serif;min-height:100vh;display:flex;align-items:flex-start;justify-content:center}
+#app{width:100%;max-width:480px;min-height:100vh}
+button{cursor:pointer;font-family:Georgia,serif}
+input{font-family:Georgia,serif}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:rgba(34,197,94,.2);border-radius:2px}
+@keyframes pulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const MESES=["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+const fmt=n=>n>=1e9?`$${(n/1e9).toFixed(1)}B`:n>=1e6?`$${(n/1e6).toFixed(0)}M`:`$${(n/1e3).toFixed(0)}K`;
+
+let ASESORES={};
+let estado={pantalla:"cargando",msg:"Conectando con Google Drive...",asesorSeleccionado:null,asesorActivo:null,pin:"",pinError:false,vista:"chat",msgs:[],cargando:false,filtroCartera:"Todos"};
+
+// ─── CARGA DESDE DRIVE ───────────────────────────────────────────────────────
+async function cargarDrive(){
+  try{
+    setState({pantalla:"cargando",msg:"Cargando datos actualizados..."});
+    const res=await fetch("/.netlify/functions/datos");
+    if(!res.ok)throw new Error("Error del servidor ("+res.status+")");
+    const json=await res.json();
+    if(!json.ok)throw new Error(json.error||"Error procesando datos");
+    ASESORES=json.data;
+    console.log("Datos cargados:",Object.keys(ASESORES).length,"asesores");
+    setState({pantalla:"login"});
+    render();
+  }catch(err){
+    setState({pantalla:"error",msg:"Error: "+err.message});
+    render();
+  }
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────────
+function render(){
+  const app=document.getElementById("app");
+  if(estado.pantalla==="cargando")return app.innerHTML=renderCargando();
+  if(estado.pantalla==="error")return app.innerHTML=renderError();
+  if(estado.pantalla==="login")return app.innerHTML=renderLogin();
+  if(estado.pantalla==="pin")return app.innerHTML=renderPin();
+  app.innerHTML=renderDash();
+  setTimeout(()=>{const e=document.getElementById("end");if(e)e.scrollIntoView()},50);
+}
+
+function renderCargando(){
+  return`<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px">
+    <div style="width:52px;height:52px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px">⚡</div>
+    <div style="font-size:15px;font-weight:700;color:#f0ede8">Copiloto Asesor</div>
+    <div style="font-size:12px;color:#3a4a5e;text-align:center;padding:0 32px">${estado.msg}</div>
+    <div style="display:flex;gap:6px">${[0,1,2].map(i=>`<div style="width:8px;height:8px;border-radius:50%;background:#22c55e;opacity:.6;animation:pulse 1.2s ease infinite;animation-delay:${i*.25}s"></div>`).join("")}</div>
+  </div>`;
+}
+
+function renderError(){
+  return`<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px">
+    <div style="font-size:32px">⚠️</div>
+    <div style="font-size:14px;font-weight:700;color:#ef4444">Error al cargar datos</div>
+    <div style="font-size:12px;color:#3a4a5e;text-align:center">${estado.msg}</div>
+    <button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;border-radius:10px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.08);color:#22c55e;font-size:13px">🔄 Reintentar</button>
+  </div>`;
+}
+
+function renderLogin(){
+  const regionales={};
+  Object.entries(ASESORES).forEach(([n,d])=>{
+    if(!regionales[d.regional])regionales[d.regional]=[];
+    regionales[d.regional].push({nombre:n,...d});
+  });
+  const hoy=new Date();
+  const mesLabel=MESES[hoy.getMonth()+1]+" "+hoy.getFullYear();
+  let html=`<div style="padding:20px 16px;min-height:100vh">
+  <div style="text-align:center;margin-bottom:22px">
+    <div style="width:46px;height:46px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 10px">⚡</div>
+    <div style="font-size:19px;font-weight:700;color:#f0ede8">Copiloto Asesor</div>
+    <div style="font-size:11px;color:#3a4a5e;margin-top:3px;letter-spacing:.1em">DATOS EN VIVO · ${mesLabel.toUpperCase()}</div>
+  </div>`;
+  Object.entries(regionales).forEach(([regional,lista])=>{
+    const col=RC[regional]||"#6b7a8d";
+    html+=`<div style="margin-bottom:18px"><div style="font-size:10px;color:${col};letter-spacing:.15em;text-transform:uppercase;margin-bottom:7px;display:flex;align-items:center;gap:5px"><div style="width:6px;height:6px;border-radius:50%;background:${col}"></div>${regional}</div><div style="display:flex;flex-direction:column;gap:6px">`;
+    lista.forEach(a=>{
+      const pc=a.pct>=90?"#22c55e":a.pct>=65?"#d97706":"#ef4444";
+      const r=(46-8)/2,ci=2*Math.PI*r,fi=ci*Math.min(a.pct,100)/100;
+      html+=`<button onclick="elegir('${a.nombre.replace(/'/g,"\\'")}\")" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;color:#f0ede8">
+        <div><div style="font-size:13px;font-weight:700;margin-bottom:2px">${a.nombre}</div>
+        <div style="font-size:11px;color:#3a4a5e">${a.clientes} clientes · ${a.riesgoAlto} en riesgo</div></div>
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="font-size:12px;font-weight:700;color:${pc}">${a.pct}%</div>
+          <div style="position:relative;width:46px;height:46px">
+            <svg width="46" height="46" style="transform:rotate(-90deg)"><circle cx="23" cy="23" r="${r}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="6"/><circle cx="23" cy="23" r="${r}" fill="none" stroke="${pc}" stroke-width="6" stroke-dasharray="${fi} ${ci}" stroke-linecap="round"/></svg>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#f0ede8">${a.pct}%</div>
+          </div>
+        </div>
+      </button>`;
+    });
+    html+=`</div></div>`;
+  });
+  return html+`<div style="text-align:center;font-size:11px;color:#1e2d42;margin-top:12px">🟢 Datos en vivo desde Google Drive</div></div>`;
+}
+
+function renderPin(){
+  const a=ASESORES[estado.asesorSeleccionado];
+  const col=RC[a.regional]||"#22c55e";
+  const dots=[0,1,2,3].map(i=>{
+    const f=estado.pin.length>i,bg=f?(estado.pinError?"#dc2626":"#22c55e"):"rgba(255,255,255,.1)",bd=f?(estado.pinError?"#dc2626":"#22c55e"):"rgba(255,255,255,.15)";
+    return`<div style="width:16px;height:16px;border-radius:50%;background:${bg};border:2px solid ${bd};transition:all .15s"></div>`;
+  }).join("");
+  const msg=estado.pinError?"PIN incorrecto, intenta de nuevo":estado.pin.length===0?"Ingresa tu PIN de 4 dígitos":"&nbsp;";
+  const teclado=["1","2","3","4","5","6","7","8","9","","0","⌫"].map(d=>{
+    if(d==="")return`<div></div>`;
+    const bg=d==="⌫"?"rgba(239,68,68,.08)":"rgba(255,255,255,.04)",tc=d==="⌫"?"#ef4444":"#f0ede8";
+    return`<button onclick="digitoPin('${d}')" style="height:54px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:${bg};color:${tc};font-size:${d==="⌫"?18:20}px;font-weight:600">${d}</button>`;
+  }).join("");
+  return`<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px">
+    <div style="width:50px;height:50px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:23px;margin-bottom:16px">⚡</div>
+    <div style="font-size:15px;font-weight:700;color:#f0ede8;margin-bottom:3px">${estado.asesorSeleccionado.split(" ").slice(0,2).join(" ")}</div>
+    <div style="font-size:11px;color:${col};letter-spacing:.12em;margin-bottom:26px">${a.regional}</div>
+    <div style="display:flex;gap:14px;margin-bottom:10px">${dots}</div>
+    <div style="height:18px;font-size:12px;color:${estado.pinError?"#ef4444":"#3a4a5e"};margin-bottom:18px">${msg}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:210px">${teclado}</div>
+    <button onclick="volverLogin()" style="margin-top:22px;background:none;border:none;color:#3a4a5e;font-size:12px">← Volver</button>
+  </div>`;
+}
+
+function renderDash(){
+  const d=ASESORES[estado.asesorActivo];
+  const falta=d.meta-d.ventas;
+  const hoy=new Date(),diasRest=new Date(hoy.getFullYear(),hoy.getMonth()+1,0).getDate()-hoy.getDate();
+  const pc=d.pct>=90?"#22c55e":d.pct>=65?"#f59e0b":"#ef4444";
+  const r=(88-12)/2,ci=2*Math.PI*r,fi=ci*Math.min(d.pct,100)/100;
+  const navTabs=["chat","meta","agenda","cartera"].map((id,i)=>{
+    const lbs=["💬 Chat IA","🎯 Mi Meta","📅 Agenda","👥 Cartera"],ac=estado.vista===id;
+    return`<button onclick="setVista('${id}')" style="flex:1;padding:9px 4px;border:none;background:transparent;border-bottom:2px solid ${ac?"#22c55e":"transparent"};color:${ac?"#22c55e":"#3a4a5e"};font-size:10px;letter-spacing:.06em;text-transform:uppercase">${lbs[i]}</button>`;
+  }).join("");
+
+  let contenido="";
+  if(estado.vista==="chat"){
+    const msgsHtml=estado.msgs.map(m=>{
+      const parts=m.txt.split(/(\*\*[^*]+\*\*)/g).map(p=>p.startsWith("**")&&p.endsWith("**")?`<strong style="color:#22c55e">${p.slice(2,-2)}</strong>`:p).join("");
+      if(m.bot)return`<div style="display:flex;gap:8px;align-items:flex-start"><div style="width:26px;height:26px;border-radius:7px;background:#16a34a;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;color:#060b14">⚡</div><div style="max-width:82%;font-size:13px;color:#ddd8d0;background:rgba(255,255,255,.04);border:1px solid rgba(34,197,94,.1);border-radius:3px 12px 12px 12px;padding:9px 13px;line-height:1.75">${parts}</div></div>`;
+      return`<div style="display:flex;justify-content:flex-end"><div style="max-width:82%;font-size:13px;color:#ddd8d0;background:linear-gradient(135deg,#1a3060,#1e4070);border:1px solid #1e4070;border-radius:12px 3px 12px 12px;padding:9px 13px;line-height:1.75">${parts}</div></div>`;
+    }).join("");
+    const cargandoHtml=estado.cargando?`<div style="display:flex;gap:4px;padding-left:34px">${[0,1,2].map(i=>`<div style="width:7px;height:7px;border-radius:50%;background:#22c55e;opacity:.6;animation:pulse 1.2s ease infinite;animation-delay:${i*.2}s"></div>`).join("")}</div>`:"";
+    const sugs=["¿A quién visito hoy?","¿Cómo llego a la meta?","¿Qué clientes no compran?","Dame un guión de venta"];
+    const sugsHtml=sugs.map(s=>`<button onclick="enviar('${s}')" style="padding:5px 10px;border-radius:14px;border:1px solid rgba(34,197,94,.2);background:rgba(34,197,94,.05);color:#22c55e;font-size:11px">${s}</button>`).join("");
+    contenido=`<div style="display:flex;flex-direction:column;height:430px">
+      <div id="msgs" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-bottom:8px">${msgsHtml}${cargandoHtml}<div id="end"></div></div>
+      <div style="padding-top:8px">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">${sugsHtml}</div>
+        <div style="display:flex;gap:8px">
+          <input id="inp" onkeydown="if(event.key==='Enter')enviar()" placeholder="Pregúntame..." style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:10px 13px;color:#ddd8d0;font-size:13px"/>
+          <button onclick="enviar()" style="width:44px;height:44px;border-radius:10px;border:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#060b14;font-size:18px;font-weight:700">→</button>
+        </div>
+      </div>
+    </div>`;
+  } else if(estado.vista==="meta"){
+    const evo=d.evolucion||[];
+    const maxV=Math.max(...evo.map(e=>Math.max(e.meta,e.ventas)),1);
+    const barras=evo.slice(-8).map(e=>{
+      const hM=Math.round(e.meta/maxV*80),hV=Math.round(e.ventas/maxV*80),col=e.ventas>=e.meta?"#22c55e":"#f59e0b";
+      return`<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1">
+        <div style="font-size:8px;color:${col};font-weight:700">${e.pct}%</div>
+        <div style="width:100%;display:flex;gap:1px;align-items:flex-end;height:80px">
+          <div style="flex:1;background:rgba(255,255,255,.1);border-radius:3px 3px 0 0;height:${hM}px"></div>
+          <div style="flex:1;background:${col};border-radius:3px 3px 0 0;height:${hV}px"></div>
+        </div>
+        <div style="font-size:8px;color:#3a4a5e;text-align:center">${e.label}</div>
+      </div>`;
+    }).join("");
+    contenido=`<div style="padding:4px 0">
+      <div style="display:flex;align-items:center;gap:16px;padding:16px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:13px;margin-bottom:14px">
+        <div style="position:relative;width:88px;height:88px;flex-shrink:0">
+          <svg width="88" height="88" style="transform:rotate(-90deg)"><circle cx="44" cy="44" r="${r}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/><circle cx="44" cy="44" r="${r}" fill="none" stroke="${pc}" stroke-width="8" stroke-dasharray="${fi} ${ci}" stroke-linecap="round"/></svg>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:#f0ede8">${d.pct}%</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#3a4a5e;margin-bottom:4px">META ${MESES[new Date().getMonth()+1].toUpperCase()} ${new Date().getFullYear()}</div>
+          <div style="font-size:22px;font-weight:800;color:#f0ede8">${fmt(d.ventas)}</div>
+          <div style="font-size:12px;color:#3a4a5e">de ${fmt(d.meta)} · ${falta>0?`<span style="color:#f59e0b">Faltan ${fmt(falta)}</span>`:`<span style="color:#22c55e">¡Meta cumplida! 🎉</span>`}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        ${[{l:"Días restantes",v:diasRest,c:"#60a5fa"},{l:"Necesitas/día",v:falta>0?fmt(Math.round(falta/Math.max(diasRest,1))):"✅",c:"#f59e0b"},{l:"Total clientes",v:d.clientes,c:"#a78bfa"},{l:"Riesgo alto",v:d.riesgoAlto,c:"#ef4444"}].map(s=>`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px 14px"><div style="font-size:10px;color:#3a4a5e;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px">${s.l}</div><div style="font-size:20px;font-weight:800;color:${s.c}">${s.v}</div></div>`).join("")}
+      </div>
+      ${evo.length?`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px">
+        <div style="font-size:10px;color:#22c55e;letter-spacing:.12em;margin-bottom:12px">HISTÓRICO META VS VENTAS</div>
+        <div style="display:flex;gap:4px;align-items:flex-end;height:100px">${barras}</div>
+        <div style="display:flex;gap:12px;margin-top:8px"><div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#3a4a5e"><div style="width:12px;height:6px;background:rgba(255,255,255,.1);border-radius:2px"></div>Meta</div><div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#22c55e"><div style="width:12px;height:6px;background:#22c55e;border-radius:2px"></div>Ventas</div></div>
+      </div>`:""}
+    </div>`;
+  } else if(estado.vista==="agenda"){
+    const sorted=[...d.clientes_list].sort((a,b)=>(b.r==="Alto"?3:b.r==="Medio"?2:1)-(a.r==="Alto"?3:a.r==="Medio"?2:1)||(b.d-a.d)).slice(0,6);
+    contenido=`<div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:10px;color:#3a4a5e;letter-spacing:.15em;text-transform:uppercase;margin-bottom:4px">📅 Prioridades de hoy</div>
+      ${sorted.map((c,i)=>{
+        const col=c.r==="Alto"?{c:"#ef4444",bg:"rgba(239,68,68,.07)",bd:"rgba(239,68,68,.2)"}:c.r==="Medio"?{c:"#f59e0b",bg:"rgba(245,158,11,.07)",bd:"rgba(245,158,11,.2)"}:{c:"#22c55e",bg:"rgba(34,197,94,.07)",bd:"rgba(34,197,94,.2)"};
+        const msg=c.r==="Alto"?"🔴 Visita urgente — riesgo alto":c.r==="Medio"?"🟡 Reactivar pronto":"🟢 Mantener relación activa";
+        return`<div style="background:${col.bg};border:1px solid ${col.bd};border-radius:11px;padding:12px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="width:22px;height:22px;border-radius:50%;background:${col.c};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#060b14;flex-shrink:0">${i+1}</div>
+              <div style="font-size:13px;font-weight:700;color:#f0ede8;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.n}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:12px;font-weight:700;color:${col.c}">${fmt(c.v)}</div>
+              <div style="font-size:10px;color:#3a4a5e">${c.d<=1?"Activo":c.d+" días"}</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:#3a4a5e;margin-bottom:4px">${c.c}</div>
+          <div style="font-size:11.5px;color:${col.c};font-weight:600">${msg}</div>
+        </div>`;
+      }).join("")}
+      <button onclick="setVista('chat');setTimeout(()=>enviar('Dame un plan de visitas detallado para hoy'),100)" style="margin-top:2px;padding:11px;border-radius:10px;border:1px solid rgba(34,197,94,.3);background:rgba(34,197,94,.06);color:#22c55e;font-size:12px">⚡ Plan de visitas con IA →</button>
+    </div>`;
+  } else {
+    const filtros=["Todos","Alto","Medio","Bajo"];
+    const fa=estado.filtroCartera||"Todos";
+    const filtrados=fa==="Todos"?d.clientes_list:d.clientes_list.filter(c=>c.r===fa);
+    const filtrosHtml=filtros.map(f=>{
+      const ac=fa===f,bg=ac?(f==="Alto"?"#ef4444":f==="Medio"?"#f59e0b":f==="Bajo"?"#22c55e":"#22c55e"):"rgba(255,255,255,.05)",col=ac?"#060b14":"#3a4a5e";
+      return`<button onclick="setFiltro('${f}')" style="padding:5px 11px;border-radius:14px;border:none;background:${bg};color:${col};font-size:11px;font-weight:600">${f==="Todos"?"Todos ("+d.clientes_list.length+")":f==="Alto"?"🔴 Urgente":f==="Medio"?"⚠️ Ojo":"✅ OK"}</button>`;
+    }).join("");
+    const listHtml=filtrados.map(c=>{
+      const dc=c.d>90?"#ef4444":c.d>30?"#f59e0b":"#22c55e";
+      return`<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center">
+        <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:#f0ede8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px">${c.n}</div><div style="font-size:11px;color:#3a4a5e">${c.c}</div></div>
+        <div style="text-align:right;flex-shrink:0;margin-left:8px"><div style="font-size:12.5px;font-weight:700;color:#c8a96e">${fmt(c.v)}</div><div style="font-size:11px;color:${dc}">${c.d<=1?"Activo hoy":c.d+" días"}</div></div>
+      </div>`;
+    }).join("");
+    contenido=`<div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${filtrosHtml}</div><div style="display:flex;flex-direction:column;gap:7px;max-height:400px;overflow-y:auto">${listHtml}</div></div>`;
+  }
+
+  const rRing=(s,p)=>{const rv=(s-8)/2,cv=2*Math.PI*rv,fv=cv*Math.min(p,100)/100,col=p>=90?"#22c55e":p>=65?"#f59e0b":"#ef4444";return`<div style="position:relative;width:${s}px;height:${s}px"><svg width="${s}" height="${s}" style="transform:rotate(-90deg)"><circle cx="${s/2}" cy="${s/2}" r="${rv}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="6"/><circle cx="${s/2}" cy="${s/2}" r="${rv}" fill="none" stroke="${col}" stroke-width="6" stroke-dasharray="${fv} ${cv}" stroke-linecap="round"/></svg><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:${s>40?11:9}px;font-weight:800;color:#f0ede8">${p}%</div></div>`;};
+
+  return`<div style="display:flex;flex-direction:column;min-height:100vh">
+    <div style="background:linear-gradient(135deg,#08121e,#0e1e32);border-bottom:1px solid #0f1e34;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:9px">${rRing(40,d.pct)}<div><div style="font-size:12px;font-weight:700;color:#f0ede8">${estado.asesorActivo.split(" ").slice(0,2).join(" ")}</div><div style="font-size:10px;color:#3a4a5e">${d.regional} · ${fmt(d.ventas)} / ${fmt(d.meta)}</div></div></div>
+      <button onclick="volverLogin()" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:5px 10px;color:#3a4a5e;font-size:11px">↩ Salir</button>
+    </div>
+    <div style="display:flex;background:rgba(0,0,0,.3);border-bottom:1px solid #0f1e34;flex-shrink:0">${navTabs}</div>
+    <div style="flex:1;padding:12px 14px 20px;overflow-y:auto">${contenido}</div>
+  </div>`;
+}
+
+// ─── ACCIONES ────────────────────────────────────────────────────────────────
+function elegir(nombre){setState({asesorSeleccionado:nombre,pin:"",pinError:false,pantalla:"pin"});render();}
+function volverLogin(){setState({pantalla:"login",asesorActivo:null,asesorSeleccionado:null});render();}
+function setVista(v){setState({vista:v});render();}
+function setFiltro(f){setState({filtroCartera:f});render();}
+
+function digitoPin(d){
+  if(d==="⌫"){setState({pin:estado.pin.slice(0,-1),pinError:false});render();return;}
+  if(estado.pin.length>=4)return;
+  const nuevo=estado.pin+d;
+  setState({pin:nuevo,pinError:false});render();
+  if(nuevo.length===4){
+    setTimeout(()=>{
+      if(nuevo===PINS[estado.asesorSeleccionado]){
+        const a=ASESORES[estado.asesorSeleccionado];
+        const falta=a.meta-a.ventas;
+        const hoy=new Date(),dr=new Date(hoy.getFullYear(),hoy.getMonth()+1,0).getDate()-hoy.getDate();
+        setState({asesorActivo:estado.asesorSeleccionado,pantalla:"dashboard",vista:"chat",pin:"",
+          msgs:[{bot:true,txt:`¡Hola ${estado.asesorSeleccionado.split(" ")[0]}! 👋 Datos actualizados al **${hoy.toLocaleDateString("es-CO")}**\n\n🎯 **Meta ${MESES[hoy.getMonth()+1]}:** ${fmt(a.meta)} · Llevas **${a.pct}%**\n${falta>0?`⚡ Faltan **${fmt(falta)}** en ${dr} días`:"✅ ¡Meta cumplida! 🎉"}\n⚠️ **${a.riesgoAlto}** clientes en riesgo alto · **${a.riesgoMedio}** en riesgo medio\n\n¿Qué quieres consultar hoy?`}]});
+      }else{setState({pinError:true,pin:""});}
+      render();
+    },200);
+  }
+}
+
+async function enviar(txt){
+  const input=document.getElementById("inp");
+  const msg=txt||(input?input.value.trim():"");
+  if(!msg||estado.cargando)return;
+  if(input)input.value="";
+  estado.msgs.push({bot:false,txt:msg});
+  setState({cargando:true});render();
+  setTimeout(()=>{const e=document.getElementById("end");if(e)e.scrollIntoView({behavior:"smooth"})},50);
+  const d=ASESORES[estado.asesorActivo];
+  const falta=d.meta-d.ventas;
+  const hoy=new Date();
+  try{
+    const hist=estado.msgs.slice(-6,-1).map(m=>({role:m.bot?"assistant":"user",content:m.txt}));
+    const topCli=d.clientes_list.slice(0,5).map(c=>`${c.n} (${fmt(c.v)}, ${c.d} días sin comprar, riesgo ${c.r})`).join("; ");
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:700,
+        system:`Eres el copiloto comercial personal del asesor ${estado.asesorActivo} de una empresa distribuidora eléctrica colombiana.
+
+DATOS REALES (actualizados hoy ${hoy.toLocaleDateString("es-CO")}):
+- Regional: ${d.regional}
+- Meta mes: ${fmt(d.meta)} | Ventas: ${fmt(d.ventas)} (${d.pct}%)
+- Falta para meta: ${fmt(falta)} | Días restantes: ${new Date(hoy.getFullYear(),hoy.getMonth()+1,0).getDate()-hoy.getDate()}
+- Clientes en cartera: ${d.clientes} | Riesgo alto: ${d.riesgoAlto} | Riesgo medio: ${d.riesgoMedio}
+- Top clientes: ${topCli}
+
+INSTRUCCIONES: Habla de TÚ, usa nombres y cifras reales, sé muy concreto y accionable. Máx 200 palabras. Termina siempre con UNA acción concreta para HOY.`,
+        messages:[...hist,{role:"user",content:msg}]})
+    });
+    const data=await res.json();
+    estado.msgs.push({bot:true,txt:data.content?.[0]?.text||"Error al responder"});
+  }catch(e){estado.msgs.push({bot:true,txt:"⚠️ Error de conexión. Intenta de nuevo."});}
+  setState({cargando:false});render();
+  setTimeout(()=>{const e=document.getElementById("end");if(e)e.scrollIntoView({behavior:"smooth"})},50);
+}
+
+// Arrancar
+render();
+cargarDrive();
+</script>
+</body>
+</html>
