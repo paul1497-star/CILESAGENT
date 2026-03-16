@@ -1,10 +1,7 @@
 [build]
-  publish = "public"
-  functions = "netlify/functions"
+  publish = "copiloto-final/public"
+  functions = "copiloto-final/netlify/functions"
+  command = "cd copiloto-final && npm install"
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["node_modules/xlsx/**"]
-
-[[plugins]]
-  package = "@netlify/plugin-functions-install-core"
